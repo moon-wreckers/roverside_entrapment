@@ -75,6 +75,12 @@ def entrapment_detector():
     rospy.Subscriber(topic_wheelodom, Odometry, cb_ak_wheelodom)
     rospy.Subscriber(topic_refodom, Odometry, cb_ak_refodom)
 
+    pub_entrapped = rospy.Publisher('health/prob/entrapped', Float32, queue_size=10)
+    pub_slipping = rospy.Publisher('health/prob/slipping', Float32, queue_size=10)
+    pub_stopped = rospy.Publisher('health/prob/stopped', Float32, queue_size=10)
+    pub_moving = rospy.Publisher('health/prob/moving', Float32, queue_size=10)
+    pub_status = rospy.Publisher('health/status', String, queue_size=10)
+
     p_D = np.array([[0.01],  # D = diverged
                     [0.99]]) # D = consistent
 
@@ -110,13 +116,35 @@ def entrapment_detector():
                         [Pr_v_stopped(Y[0,0]) * p_M[1,0]]])
         p_M = normalize(n_M)
 
-        # compute entrapment likelihood
-        p_entrapped = p_D[0,0] * p_M[1,0]
+        # compute health status likelihoods
+        p_health = [p_D[0,0] * p_M[1,0], # entrapped
+                    p_D[0,0] * p_M[0,0], # slipping
+                    p_D[1,0] * p_M[1,0], # stopped
+                    p_D[1,0] * p_M[0,0]] # moving
 
         #print('%.6s => %.6s, %.6s' % (Y[0,0], Pr_v_moving(Y[0,0]), Pr_v_stopped(Y[0,0])))
         print('P(dvg)=%s, P(stp)=%s, P(entr)=%s' % (
-            p_D[0,0], p_M[1,0], p_entrapped
+            p_D[0,0], p_M[1,0], p_health[0]
         ))
+
+        # publish health status probabilities
+        pub_entrapped.publish(p_health[0])
+        pub_slipping.publish(p_health[1])
+        pub_stopped.publish(p_health[2])
+        pub_moving.publish(p_health[3])
+
+        # publish health status
+        status_code = np.argmax(p_health)
+        if status_code == 0:
+            pub_status.publish('entrapped')
+        elif status_code == 1:
+            pub_status.publish('slipping')
+        elif status_code == 2:
+            pub_status.publish('stopped')
+        elif status_code == 3:
+            pub_status.publish('moving')
+        else:
+            rospy.logerr('unexpected health status code (%s)' % (status_code))
 
         rate.sleep()
 
