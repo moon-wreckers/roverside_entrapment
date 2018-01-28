@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package>
+  <name>roverside_entrapment</name>
+  <version>0.0.1</version>
+  <description>The Roverside entrapment detection package</description>
+  <url type="website">http://mrsdprojects.ri.cmu.edu/2017teami/</url>
+  <license>Reserved</license>
+
+  <author email="dq@cs.cmu.edu">David Qiu</author>
+  <maintainer email="dq@cs.cmu.edu">david</maintainer>
+
+  <build_depend>message_generation</build_depend>
+  <run_depend>message_runtime</run_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>rospy</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <run_depend>roscpp</run_depend>
+  <run_depend>rospy</run_depend>
+  <run_depend>std_msgs</run_depend>
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+  </export>
+</package>
