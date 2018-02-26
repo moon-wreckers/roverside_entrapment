@@ -18,6 +18,11 @@ from sensor_msgs.msg import Imu, JointState, Joy
 from geometry_msgs.msg import Vector3Stamped, Twist
 from nav_msgs.msg import Odometry
 
+import csv
+
+
+CONFIG_ENABLE_LOG = False
+
 
 ak_wheelodom = Odometry()
 ak_refodom = Odometry()
@@ -70,6 +75,8 @@ def entrapment_detector():
     R = np.array([[1, 0],
                   [0, 0.05]])
 
+    last_status_filtered = 'stopped'
+
     rospy.init_node('entrapment_detector', anonymous=True)
 
     rospy.Subscriber(topic_wheelodom, Odometry, cb_ak_wheelodom)
@@ -80,6 +87,12 @@ def entrapment_detector():
     pub_stopped = rospy.Publisher('health/prob/stopped', Float32, queue_size=10)
     pub_moving = rospy.Publisher('health/prob/moving', Float32, queue_size=10)
     pub_status = rospy.Publisher('health/status', String, queue_size=10)
+    pub_status_filtered = rospy.Publisher('health/status_filtered', String, queue_size=10)
+
+    if CONFIG_ENABLE_LOG:
+        csvfile = open('entrapment_detection_log.csv', 'wb')
+        spamwriter = csv.writer(
+            csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
 
     p_D = np.array([[0.01],  # D = diverged
                     [0.99]]) # D = consistent
@@ -122,11 +135,6 @@ def entrapment_detector():
                     p_D[1,0] * p_M[1,0], # stopped
                     p_D[1,0] * p_M[0,0]] # moving
 
-        #print('%.6s => %.6s, %.6s' % (Y[0,0], Pr_v_moving(Y[0,0]), Pr_v_stopped(Y[0,0])))
-        print('P(dvg)=%s, P(stp)=%s, P(entr)=%s' % (
-            p_D[0,0], p_M[1,0], p_health[0]
-        ))
-
         # publish health status probabilities
         pub_entrapped.publish(p_health[0])
         pub_slipping.publish(p_health[1])
@@ -137,14 +145,40 @@ def entrapment_detector():
         status_code = np.argmax(p_health)
         if status_code == 0:
             pub_status.publish('entrapped')
+            last_status_filtered = 'entrapped'
         elif status_code == 1:
             pub_status.publish('slipping')
+            last_status_filtered = 'slipping'
         elif status_code == 2:
             pub_status.publish('stopped')
+            if last_status_filtered != 'entrapped':
+                last_status_filtered = 'stopped'
         elif status_code == 3:
             pub_status.publish('moving')
+            last_status_filtered = 'moving'
         else:
             rospy.logerr('unexpected health status code (%s)' % (status_code))
+
+        pub_status_filtered.publish(last_status_filtered)
+
+        print('P(dvg)=%s, P(stp)=%s, P(entr)=%s, status_filtered=%s' % (
+            float(p_D[0,0]), float(p_M[1,0]), float(p_health[0]), last_status_filtered
+        ))
+
+        if CONFIG_ENABLE_LOG:
+            output_line = [
+                float(L),
+                float(Y[0,0]),
+                float(p_D[0,0]),
+                float(p_D[1,0]),
+                float(p_M[0,0]),
+                float(p_M[1,0]),
+                float(p_health[0]),
+                float(p_health[1]),
+                float(p_health[2]),
+                float(p_health[3]),
+            ]
+            spamwriter.writerow(output_line)
 
         rate.sleep()
 
