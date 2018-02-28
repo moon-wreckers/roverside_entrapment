@@ -70,7 +70,7 @@ def cb_ak_refodom(data):
 
 def entrapment_detector():
     topic_wheelodom = '/ak1/odom'
-    topic_refodom = '/vive/LHR_0EB0243A_odom'
+    topic_refodom = '/vive/LHR_0EB0243A_odom' # ak1: /vive/LHR_0EB0243A_odom, ak2: /vive/LHR_08DF7BFF_odom
 
     R = np.array([[1, 0],
                   [0, 0.05]])
@@ -161,8 +161,8 @@ def entrapment_detector():
 
         pub_status_filtered.publish(last_status_filtered)
 
-        print('P(dvg)=%s, P(stp)=%s, P(entr)=%s, status_filtered=%s' % (
-            float(p_D[0,0]), float(p_M[1,0]), float(p_health[0]), last_status_filtered
+        print('L=%s, v=%s, P(dvg)=%s, P(stp)=%s, P(entr)=%s, status_code=%s' % (
+            float(L), float(Y[0,0]), float(p_D[0,0]), float(p_M[1,0]), float(p_health[0]), status_code
         ))
 
         if CONFIG_ENABLE_LOG:
