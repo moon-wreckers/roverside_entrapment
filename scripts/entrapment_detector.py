@@ -13,6 +13,7 @@ __copyright__   = "Copyright (C) 2018, the Moon Wreckers. All rights reserved."
 
 import rospy
 import numpy as np
+from collections import deque
 from std_msgs.msg import String, Float32, UInt16
 from sensor_msgs.msg import Imu, JointState, Joy
 from geometry_msgs.msg import Vector3Stamped, Twist
@@ -22,6 +23,11 @@ import csv
 
 
 CONFIG_ENABLE_LOG = False
+CONFIG_DEBUG_PUBLISHER = False
+CONFIG_DEBUG_PRINT_DATA_SOURCE = True
+
+CONFIG_TOPIC_WHEELODOM = '/ak1/odom'
+CONFIG_TOPIC_REFODOM = '/vive/LHR_0EB0243A_odom' # ak1: /vive/LHR_0EB0243A_odom, ak2: /vive/LHR_08DF7BFF_odom
 
 
 ak_wheelodom = Odometry()
@@ -37,7 +43,8 @@ def Pr_L_consistent(L):
 
 
 def Pr_L_diverged(L):
-    return normpdf(L, 0.426055, 0.011208)
+    #return normpdf(L, 0.426055, 0.011208)
+    return normpdf(L, 0.192272, 0.021208)
 
 
 def Pr_v_stopped(v):
@@ -69,8 +76,13 @@ def cb_ak_refodom(data):
 
 
 def entrapment_detector():
-    topic_wheelodom = '/ak1/odom'
-    topic_refodom = '/vive/LHR_0EB0243A_odom' # ak1: /vive/LHR_0EB0243A_odom, ak2: /vive/LHR_08DF7BFF_odom
+    if CONFIG_DEBUG_PUBLISHER:
+        debug_prefix = '/debug/'
+    else:
+        debug_prefix = ''
+
+    topic_wheelodom = CONFIG_TOPIC_WHEELODOM
+    topic_refodom = CONFIG_TOPIC_REFODOM
 
     R = np.array([[1, 0],
                   [0, 0.05]])
@@ -82,12 +94,12 @@ def entrapment_detector():
     rospy.Subscriber(topic_wheelodom, Odometry, cb_ak_wheelodom)
     rospy.Subscriber(topic_refodom, Odometry, cb_ak_refodom)
 
-    pub_entrapped = rospy.Publisher('health/prob/entrapped', Float32, queue_size=10)
-    pub_slipping = rospy.Publisher('health/prob/slipping', Float32, queue_size=10)
-    pub_stopped = rospy.Publisher('health/prob/stopped', Float32, queue_size=10)
-    pub_moving = rospy.Publisher('health/prob/moving', Float32, queue_size=10)
-    pub_status = rospy.Publisher('health/status', String, queue_size=10)
-    pub_status_filtered = rospy.Publisher('health/status_filtered', String, queue_size=10)
+    pub_entrapped = rospy.Publisher(debug_prefix + 'health/prob/entrapped', Float32, queue_size=10)
+    pub_slipping = rospy.Publisher(debug_prefix + 'health/prob/slipping', Float32, queue_size=10)
+    pub_stopped = rospy.Publisher(debug_prefix + 'health/prob/stopped', Float32, queue_size=10)
+    pub_moving = rospy.Publisher(debug_prefix + 'health/prob/moving', Float32, queue_size=10)
+    pub_status = rospy.Publisher(debug_prefix + 'health/status', String, queue_size=10)
+    pub_status_filtered = rospy.Publisher(debug_prefix + 'health/status_filtered', String, queue_size=10)
 
     if CONFIG_ENABLE_LOG:
         csvfile = open('entrapment_detection_log.csv', 'wb')
@@ -99,6 +111,12 @@ def entrapment_detector():
 
     p_M = np.array([[0.01],  # M = moving
                     [0.99]]) # M = stopped
+
+    q_size = 10 # smooth decay filter size
+    q_decay = 0.9 # decay rate
+    q_factors = np.array([])
+    q_X = deque(maxlen=q_size) # filter queue for wheel odometry metrics
+    q_Y = deque(maxlen=q_size) # filter queue for reference odometry metrics
 
     rate = rospy.Rate(10)
     while not rospy.is_shutdown():
@@ -161,9 +179,12 @@ def entrapment_detector():
 
         pub_status_filtered.publish(last_status_filtered)
 
-        print('L=%s, v=%s, P(dvg)=%s, P(stp)=%s, P(entr)=%s, status_code=%s' % (
-            float(L), float(Y[0,0]), float(p_D[0,0]), float(p_M[1,0]), float(p_health[0]), status_code
-        ))
+        if CONFIG_DEBUG_PRINT_DATA_SOURCE:
+            print('X=[%f, %f], Y=[%f, %f], L=%f, S=%s' % (X[0,0], X[1,0], Y[0,0], Y[1,0], L, last_status_filtered))
+        else:
+            print('L=%s, v=%s, P(dvg)=%s, P(stp)=%s, P(entr)=%s, status_code=%s' % (
+                float(L), float(Y[0,0]), float(p_D[0,0]), float(p_M[1,0]), float(p_health[0]), status_code
+            ))
 
         if CONFIG_ENABLE_LOG:
             output_line = [
