@@ -18,6 +18,7 @@ from std_msgs.msg import String, Float32, UInt16
 from sensor_msgs.msg import Imu, JointState, Joy
 from geometry_msgs.msg import Vector3Stamped, Twist
 from nav_msgs.msg import Odometry
+from DecayFilter import DecayFilter
 
 import csv
 
@@ -81,30 +82,7 @@ def entrapment_detector():
     else:
         debug_prefix = ''
 
-    topic_wheelodom = CONFIG_TOPIC_WHEELODOM
-    topic_refodom = CONFIG_TOPIC_REFODOM
-
-    R = np.array([[1, 0],
-                  [0, 0.05]])
-
     last_status_filtered = 'stopped'
-
-    rospy.init_node('entrapment_detector', anonymous=True)
-
-    rospy.Subscriber(topic_wheelodom, Odometry, cb_ak_wheelodom)
-    rospy.Subscriber(topic_refodom, Odometry, cb_ak_refodom)
-
-    pub_entrapped = rospy.Publisher(debug_prefix + 'health/prob/entrapped', Float32, queue_size=10)
-    pub_slipping = rospy.Publisher(debug_prefix + 'health/prob/slipping', Float32, queue_size=10)
-    pub_stopped = rospy.Publisher(debug_prefix + 'health/prob/stopped', Float32, queue_size=10)
-    pub_moving = rospy.Publisher(debug_prefix + 'health/prob/moving', Float32, queue_size=10)
-    pub_status = rospy.Publisher(debug_prefix + 'health/status', String, queue_size=10)
-    pub_status_filtered = rospy.Publisher(debug_prefix + 'health/status_filtered', String, queue_size=10)
-
-    if CONFIG_ENABLE_LOG:
-        csvfile = open('entrapment_detection_log.csv', 'wb')
-        spamwriter = csv.writer(
-            csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
 
     p_D = np.array([[0.01],  # D = diverged
                     [0.99]]) # D = consistent
@@ -112,40 +90,77 @@ def entrapment_detector():
     p_M = np.array([[0.01],  # M = moving
                     [0.99]]) # M = stopped
 
-    q_size = 10 # smooth decay filter size
-    q_decay = 0.9 # decay rate
-    q_factors = np.array([])
-    q_X = deque(maxlen=q_size) # filter queue for wheel odometry metrics
-    q_Y = deque(maxlen=q_size) # filter queue for reference odometry metrics
+    # define feature weight matrix
+    R = np.array([[1, 0],
+                  [0, 0.05]])
 
+    # define probability limit protection
+    prob_protection = 1e-4
+
+    # initialize odometries to listen to
+    topic_wheelodom = CONFIG_TOPIC_WHEELODOM
+    topic_refodom = CONFIG_TOPIC_REFODOM
+
+    # initialize ROS node
+    rospy.init_node('entrapment_detector', anonymous=True)
+
+    # initialize subscribers
+    rospy.Subscriber(topic_wheelodom, Odometry, cb_ak_wheelodom)
+    rospy.Subscriber(topic_refodom, Odometry, cb_ak_refodom)
+
+    # initialize publishers
+    pub_entrapped = rospy.Publisher(debug_prefix + 'health/prob/entrapped', Float32, queue_size=10)
+    pub_slipping = rospy.Publisher(debug_prefix + 'health/prob/slipping', Float32, queue_size=10)
+    pub_stopped = rospy.Publisher(debug_prefix + 'health/prob/stopped', Float32, queue_size=10)
+    pub_moving = rospy.Publisher(debug_prefix + 'health/prob/moving', Float32, queue_size=10)
+    pub_status = rospy.Publisher(debug_prefix + 'health/status', String, queue_size=10)
+    pub_status_filtered = rospy.Publisher(debug_prefix + 'health/status_filtered', String, queue_size=10)
+
+    # initialize log file writer
+    if CONFIG_ENABLE_LOG:
+        csvfile = open('entrapment_detection_log.csv', 'wb')
+        spamwriter = csv.writer(
+            csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+
+    # initialize decay filters
+    filterX = DecayFilter(d=0.95, wsize=32)
+    filterY = DecayFilter(d=0.95, wsize=32)
+
+    # loop process
     rate = rospy.Rate(10)
     while not rospy.is_shutdown():
-
+        # receive new measurements
         X_raw = np.array([[ak_wheelodom.twist.twist.linear.x],
                           [ak_wheelodom.twist.twist.linear.y],
                           [ak_wheelodom.twist.twist.angular.z]])
-        X = np.array([[np.linalg.norm(X_raw[0:2])],
-                      [X_raw[2,0]]])
+        X_norm = np.array([[np.linalg.norm(X_raw[0:2])],
+                          [X_raw[2,0]]])
+        filterX.append(X_norm)
 
         Y_raw = np.array([[ak_refodom.twist.twist.linear.x],
                           [ak_refodom.twist.twist.linear.y],
                           [ak_refodom.twist.twist.angular.z]])
-        Y = np.array([[np.linalg.norm(Y_raw[0:2])],
-                      [Y_raw[2,0]]])
+        Y_norm = np.array([[np.linalg.norm(Y_raw[0:2])],
+                          [Y_raw[2,0]]])
+        filterY.append(Y_norm)
 
+        # filter measurements
+        X = filterX.filtered
+        Y = filterY.filtered
+
+        # compute odometry divergence
         e = X - Y
-
         L = np.sqrt(np.dot(np.matrix.transpose(e), np.dot(R, e)))
 
         # update divergence status
         n_D = np.array([[Pr_L_diverged(L) * p_D[0,0]],
                         [Pr_L_consistent(L) * p_D[1,0]]])
-        p_D = normalize(n_D)
+        p_D = normalize(n_D, protection=prob_protection)
 
         # update movement status
         n_M = np.array([[Pr_v_moving(Y[0,0]) * p_M[0,0]],
                         [Pr_v_stopped(Y[0,0]) * p_M[1,0]]])
-        p_M = normalize(n_M)
+        p_M = normalize(n_M, protection=prob_protection)
 
         # compute health status likelihoods
         p_health = [p_D[0,0] * p_M[1,0], # entrapped
@@ -179,6 +194,7 @@ def entrapment_detector():
 
         pub_status_filtered.publish(last_status_filtered)
 
+        # print log
         if CONFIG_DEBUG_PRINT_DATA_SOURCE:
             print('X=[%f, %f], Y=[%f, %f], L=%f, S=%s' % (X[0,0], X[1,0], Y[0,0], Y[1,0], L, last_status_filtered))
         else:
@@ -186,6 +202,7 @@ def entrapment_detector():
                 float(L), float(Y[0,0]), float(p_D[0,0]), float(p_M[1,0]), float(p_health[0]), status_code
             ))
 
+        # write log file
         if CONFIG_ENABLE_LOG:
             output_line = [
                 float(L),
@@ -201,6 +218,7 @@ def entrapment_detector():
             ]
             spamwriter.writerow(output_line)
 
+        # frequency control
         rate.sleep()
 
 
