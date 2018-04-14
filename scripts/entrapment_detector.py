@@ -123,8 +123,8 @@ def entrapment_detector():
             csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
 
     # initialize decay filters
-    filterX = DecayFilter(d=0.95, wsize=32)
-    filterY = DecayFilter(d=0.95, wsize=32)
+    filterX = DecayFilter(d=0.95, wsize=16)
+    filterY = DecayFilter(d=0.95, wsize=16)
 
     # loop process
     rate = rospy.Rate(10)
