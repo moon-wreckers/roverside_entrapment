@@ -138,8 +138,8 @@ def entrapment_detector():
         filterX.append(X_norm)
 
         Y_raw = np.array([[ak_refodom.twist.twist.linear.x],
-                          [ak_refodom.twist.twist.linear.y],
-                          [ak_refodom.twist.twist.angular.z]])
+                          [ak_refodom.twist.twist.linear.z],
+                          [ak_refodom.twist.twist.angular.y]])
         Y_norm = np.array([[np.linalg.norm(Y_raw[0:2])],
                           [Y_raw[2,0]]])
         filterY.append(Y_norm)
