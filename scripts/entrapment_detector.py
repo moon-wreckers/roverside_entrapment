@@ -40,20 +40,19 @@ def normpdf(x, mu, sigma2):
 
 
 def Pr_L_consistent(L):
-    return normpdf(L, 0, 0.042947) * 2
+    return normpdf(L, 0, 0.08947) * 2
 
 
 def Pr_L_diverged(L):
-    #return normpdf(L, 0.426055, 0.011208)
-    return normpdf(L, 0.192272, 0.021208)
+    return normpdf(L, 0.40272, 0.10208)
 
 
 def Pr_v_stopped(v):
-    return normpdf(v, 0, 0.000137) * 2
+    return normpdf(v, 0, 0.03013) * 2
 
 
 def Pr_v_moving(v):
-    return normpdf(v, 0.252618, 0.022222)
+    return normpdf(v, 0.252618, 0.12222)
 
 
 def normalize(vec, protection=1e-4):
